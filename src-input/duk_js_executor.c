@@ -815,6 +815,10 @@ DUK_LOCAL void duk__reconfig_valstack_ecma_return(duk_hthread *thr) {
 	clamp_top = (duk_idx_t) (act->idx_retval - act->idx_bottom + 1);  /* +1 = one retval */
 	duk_set_top((duk_context *) thr, clamp_top);
 
+	/* FIXME: no check is needed because we don't shrink on
+	 * call/return; must be added back if shrinking ecma frames.
+	 */
+#if 0
 	(void) duk_valstack_resize_raw((duk_context *) thr,
 	                               (thr->valstack_bottom - thr->valstack) +  /* bottom of current func */
 	                                   h_func->nregs +                       /* reg count */
@@ -822,6 +826,7 @@ DUK_LOCAL void duk__reconfig_valstack_ecma_return(duk_hthread *thr) {
 	                               DUK_VSRESIZE_FLAG_SHRINK |                /* flags */
 	                               0 /* no compact */ |
 	                               DUK_VSRESIZE_FLAG_THROW);
+#endif
 
 	duk_set_top((duk_context *) thr, h_func->nregs);
 }
@@ -850,6 +855,8 @@ DUK_LOCAL void duk__reconfig_valstack_ecma_catcher(duk_hthread *thr, duk_activat
 	act = NULL;
 	cat = NULL;
 
+	/*FIXME*/
+#if 0
 	(void) duk_valstack_resize_raw((duk_context *) thr,
 	                               (thr->valstack_bottom - thr->valstack) +  /* bottom of current func */
 	                                   h_func->nregs +                       /* reg count */
@@ -857,6 +864,7 @@ DUK_LOCAL void duk__reconfig_valstack_ecma_catcher(duk_hthread *thr, duk_activat
 	                               DUK_VSRESIZE_FLAG_SHRINK |                /* flags */
 	                               0 /* no compact */ |
 	                               DUK_VSRESIZE_FLAG_THROW);
+#endif
 
 	duk_set_top((duk_context *) thr, h_func->nregs);
 }

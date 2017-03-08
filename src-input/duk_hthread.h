@@ -301,6 +301,11 @@ struct duk_hthread {
 	 * [valstack,valstack_top[ is GC-reachable, [valstack_top,valstack_end[ is
 	 * not GC-reachable but kept initialized as 'undefined'.
 	 */
+	/* FIXME: need to track valstack_reserve distinct from _end to allow
+	 * shrinking.  Or make valstack_end the end of the reserve, and add
+	 * valstack_alloc_end to track alloc size separately.  'valstack_size'
+	 * semantics?
+	 */
 	duk_tval *valstack;                     /* start of valstack allocation */
 	duk_tval *valstack_end;                 /* end of valstack allocation (exclusive) */
 	duk_tval *valstack_bottom;              /* bottom of current frame */

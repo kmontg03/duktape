@@ -727,6 +727,15 @@ DUK_LOCAL void duk__sweep_heap(duk_heap *heap, duk_int_t flags, duk_size_t *out_
 				prev = curr;
 			}
 
+			/*
+			 *  Shrink check for value stacks here
+			 */
+			if (DUK_HEAPHDR_IS_OBJECT(curr) && DUK_HOBJECT_IS_THREAD((duk_hobject *) curr)) {
+				duk_hthread *thr_curr = (duk_hthread *) curr;
+				DUK_D(DUK_DPRINT("value stack shrink check for thread: %!O", curr));
+				duk_valstack_shrink_check_nothrow(thr_curr);
+			}
+
 			DUK_HEAPHDR_CLEAR_REACHABLE(curr);
 			/* Keep FINALIZED if set, used if rescue decisions are postponed. */
 			/* Keep FINALIZABLE for objects on finalize_list. */

@@ -1020,69 +1020,6 @@ DUK_LOCAL duk_hobject *duk__resolve_target_func_and_this_binding(duk_context *ct
 }
 
 /*
- *  Value stack resize and stack top adjustment helper.
- *
- *  XXX: This should all be merged to duk_valstack_resize_raw().
- */
-
-DUK_LOCAL void duk__adjust_valstack_and_top(duk_hthread *thr,
-                                            duk_idx_t num_stack_args,
-                                            duk_idx_t idx_args,
-                                            duk_idx_t nregs,
-                                            duk_idx_t nargs,
-                                            duk_hobject *func) {
-	duk_context *ctx = (duk_context *) thr;
-	duk_size_t vs_min_size;
-	duk_bool_t adjusted_top = 0;
-
-	vs_min_size = (thr->valstack_bottom - thr->valstack) +  /* bottom of current func */
-	              idx_args;                                 /* bottom of new func */
-
-	if (nregs >= 0) {
-		DUK_ASSERT(nargs >= 0);
-		DUK_ASSERT(nregs >= nargs);
-		vs_min_size += nregs;
-	} else {
-		/* 'func' wants stack "as is" */
-		vs_min_size += num_stack_args;  /* num entries of new func at entry */
-	}
-	if (func == NULL || DUK_HOBJECT_IS_NATFUNC(func)) {
-		vs_min_size += DUK_VALSTACK_API_ENTRY_MINIMUM;  /* Duktape/C API guaranteed entries (on top of args) */
-	}
-	vs_min_size += DUK_VALSTACK_INTERNAL_EXTRA;             /* + spare */
-
-	/* XXX: We can't resize the value stack to a size smaller than the
-	 * current top, so the order of the resize and adjusting the stack
-	 * top depends on the current vs. final size of the value stack.
-	 * The operations could be combined to avoid this, but the proper
-	 * fix is to only grow the value stack on a function call, and only
-	 * shrink it (without throwing if the shrink fails) on function
-	 * return.
-	 */
-
-	if (vs_min_size < (duk_size_t) (thr->valstack_top  - thr->valstack)) {
-		DUK_DDD(DUK_DDDPRINT(("final size smaller, set top before resize")));
-
-		DUK_ASSERT(nregs >= 0);  /* can't happen when keeping current stack size */
-		duk_set_top(ctx, idx_args + nargs);  /* clamp anything above nargs */
-		duk_set_top(ctx, idx_args + nregs);  /* extend with undefined */
-		adjusted_top = 1;
-	}
-
-	(void) duk_valstack_resize_raw((duk_context *) thr,
-	                               vs_min_size,
-	                               DUK_VSRESIZE_FLAG_THROW);       /* flags: no shrink or compact */
-
-	if (!adjusted_top) {
-		if (nregs >= 0) {
-			DUK_ASSERT(nregs >= nargs);
-			duk_set_top(ctx, idx_args + nargs);  /* clamp anything above nargs */
-			duk_set_top(ctx, idx_args + nregs);  /* extend with undefined */
-		}
-	}
-}
-
-/*
  *  Manipulate value stack so that exactly 'num_stack_rets' return
  *  values are at 'idx_retbase' in every case, assuming there are
  *  'rc' return values on top of stack.
@@ -1410,6 +1347,7 @@ DUK_LOCAL void duk__handle_call_inner(duk_hthread *thr,
 	duk_instr_t **entry_ptr_curr_pc;
 	duk_idx_t nargs;            /* # argument registers target function wants (< 0 => "as is") */
 	duk_idx_t nregs;            /* # total registers target function wants on entry (< 0 => "as is") */
+	duk_size_t vs_min_size;     /* minumum value stack size for handling call */
 	duk_hobject *func;          /* 'func' on stack (borrowed reference) */
 	duk_tval *tv_func;          /* duk_tval ptr for 'func' on stack (borrowed reference) or tv_func_copy */
 	duk_tval tv_func_copy;      /* to avoid relookups */
@@ -1544,7 +1482,8 @@ DUK_LOCAL void duk__handle_call_inner(duk_hthread *thr,
 	/* [ ... func this arg1 ... argN ] */
 
 	/*
-	 *  Setup a preliminary activation and figure out nargs/nregs.
+	 *  Setup a preliminary activation and figure out nargs/nregs and
+	 *  value stack minimum size.
 	 *
 	 *  Don't touch valstack_bottom or valstack_top yet so that Duktape API
 	 *  calls work normally.
@@ -1599,6 +1538,9 @@ DUK_LOCAL void duk__handle_call_inner(duk_hthread *thr,
 	nargs = 0; DUK_UNREF(nargs);
 	nregs = 0; DUK_UNREF(nregs);
 
+	/* start of arguments: idx_func + 2. */
+	vs_min_size = (duk_size_t) ((thr->valstack_bottom - thr->valstack) + idx_func + 2);
+
 	if (DUK_LIKELY(func != NULL)) {
 		if (DUK_HOBJECT_HAS_STRICT(func)) {
 			act->flags |= DUK_ACT_FLAG_STRICT;
@@ -1606,7 +1548,9 @@ DUK_LOCAL void duk__handle_call_inner(duk_hthread *thr,
 		if (DUK_HOBJECT_IS_COMPFUNC(func)) {
 			nargs = ((duk_hcompfunc *) func)->nargs;
 			nregs = ((duk_hcompfunc *) func)->nregs;
+			DUK_ASSERT(nregs >= 0);
 			DUK_ASSERT(nregs >= nargs);
+			vs_min_size += nregs + DUK_VALSTACK_INTERNAL_EXTRA;
 		} else {
 			/* True because of call target lookup checks. */
 			DUK_ASSERT(DUK_HOBJECT_IS_NATFUNC(func));
@@ -1617,6 +1561,11 @@ DUK_LOCAL void duk__handle_call_inner(duk_hthread *thr,
 			 */
 			nargs = ((duk_hnatfunc *) func)->nargs;
 			nregs = nargs;
+			if (nargs >= 0) {
+				vs_min_size += nregs + DUK_VALSTACK_API_ENTRY_MINIMUM + DUK_VALSTACK_INTERNAL_EXTRA;
+			} else {
+				vs_min_size += num_stack_args + DUK_VALSTACK_API_ENTRY_MINIMUM + DUK_VALSTACK_INTERNAL_EXTRA;
+			}
 		}
 	} else {
 		duk_small_uint_t lf_flags;
@@ -1626,6 +1575,9 @@ DUK_LOCAL void duk__handle_call_inner(duk_hthread *thr,
 		nargs = DUK_LFUNC_FLAGS_GET_NARGS(lf_flags);
 		if (nargs == DUK_LFUNC_NARGS_VARARGS) {
 			nargs = -1;  /* vararg */
+			vs_min_size += num_stack_args + DUK_VALSTACK_API_ENTRY_MINIMUM + DUK_VALSTACK_INTERNAL_EXTRA;
+		} else {
+			vs_min_size += nregs + DUK_VALSTACK_API_ENTRY_MINIMUM + DUK_VALSTACK_INTERNAL_EXTRA;
 		}
 		nregs = nargs;
 
@@ -1739,23 +1691,20 @@ DUK_LOCAL void duk__handle_call_inner(duk_hthread *thr,
 	/* [ ... func this arg1 ... argN ] */
 
 	/*
-	 *  Setup value stack: clamp to 'nargs', fill up to 'nregs'
+	 *  Setup value stack: clamp to 'nargs', fill up to 'nregs',
+	 *  ensure value stack size matches target requirements.
 	 *
-	 *  Value stack may either grow or shrink, depending on the
-	 *  number of func registers and the number of actual arguments.
-	 *  If nregs >= 0, func wants args clamped to 'nargs'; else it
-	 *  wants all args (= 'num_stack_args').
+	 *  Value stack can only grow here.
 	 */
 
-	/* XXX: optimize value stack operation */
-	/* XXX: don't want to shrink allocation here */
-
-	duk__adjust_valstack_and_top(thr,
-	                             num_stack_args,
-	                             idx_func + 2,
-	                             nregs,
-	                             nargs,
-	                             func);
+	duk_valstack_grow_check_throw(ctx, vs_min_size);
+	if (nregs >= 0) {
+		/* FIXME: optimized operation */
+		/* FIXME: only necerssary for ecmacsript functions */
+		DUK_ASSERT(nregs >= nargs);
+		duk_set_top(ctx, idx_func + 2 + nargs);  /* clamp anything above nargs */
+		duk_set_top(ctx, idx_func + 2 + nregs);  /* extend with undefined */
+	}
 
 	/*
 	 *  Determine call type, then finalize activation, shift to
@@ -1913,11 +1862,18 @@ DUK_LOCAL void duk__handle_call_inner(duk_hthread *thr,
 	 * cause another error.
 	 */
 
+	/* FIXME: trial shrink would be OK */
+	/* FIXME: if we don't shrink, we'd still need to update some sort of
+	 * valstack_reserve field (between top and end) so that mark-and-sweep
+	 * knew how small we can safely shrink!
+	 */
+#if 0
 	(void) duk_valstack_resize_raw((duk_context *) thr,
 	                               entry_valstack_end,                    /* same as during entry */
 	                               DUK_VSRESIZE_FLAG_SHRINK |             /* flags */
 	                               DUK_VSRESIZE_FLAG_COMPACT |
 	                               DUK_VSRESIZE_FLAG_THROW);
+#endif
 
 	/* Restore entry thread executor curr_pc stack frame pointer. */
 	thr->ptr_curr_pc = entry_ptr_curr_pc;
@@ -2051,12 +2007,13 @@ DUK_LOCAL void duk__handle_call_error(duk_hthread *thr,
 	 * and thus propagate an error out of a protected call.
 	 */
 
+#if 0  /* FIXME: trial shrink would be OK */
 	(void) duk_valstack_resize_raw((duk_context *) thr,
 	                               entry_valstack_end,                    /* same as during entry */
 	                               DUK_VSRESIZE_FLAG_SHRINK |             /* flags */
 	                               DUK_VSRESIZE_FLAG_COMPACT |
 	                               DUK_VSRESIZE_FLAG_THROW);
-
+#endif
 
 	/* These are just convenience "wiping" of state.  Side effects should
 	 * not be an issue here: thr->heap and thr->heap->lj have a stable
@@ -2583,6 +2540,7 @@ DUK_INTERNAL duk_bool_t duk_handle_ecma_call_setup(duk_hthread *thr,
 	duk_idx_t idx_args;     /* valstack index of start of args (arg1) (relative to entry valstack_bottom) */
 	duk_idx_t nargs;        /* # argument registers target function wants (< 0 => never for ecma calls) */
 	duk_idx_t nregs;        /* # total registers target function wants on entry (< 0 => never for ecma calls) */
+	duk_size_t vs_min_size; /*FIXME*/
 	duk_hobject *func;      /* 'func' on stack (borrowed reference) */
 	duk_tval tv_func_ignore;  /* duk_tval for 'func' on stack */
 	duk_activation *act;
@@ -2698,7 +2656,12 @@ DUK_INTERNAL duk_bool_t duk_handle_ecma_call_setup(duk_hthread *thr,
 
 	nargs = ((duk_hcompfunc *) func)->nargs;
 	nregs = ((duk_hcompfunc *) func)->nregs;
+	DUK_ASSERT(nregs >= 0);
 	DUK_ASSERT(nregs >= nargs);
+	vs_min_size = (thr->valstack_bottom - thr->valstack) +  /* bottom of current func */
+	              idx_args +                                /* bottom of new func */
+	              nregs +
+	              DUK_VALSTACK_INTERNAL_EXTRA;
 
 	/* [ ... func this arg1 ... argN ] */
 
@@ -2978,12 +2941,17 @@ DUK_INTERNAL duk_bool_t duk_handle_ecma_call_setup(duk_hthread *thr,
 	 *  Setup value stack: clamp to 'nargs', fill up to 'nregs'
 	 */
 
-	duk__adjust_valstack_and_top(thr,
-	                             num_stack_args,
-	                             idx_args,
-	                             nregs,
-	                             nargs,
-	                             func);
+	/* FIXME: optimized operation */
+	duk_valstack_grow_check_throw(ctx, vs_min_size);
+	DUK_ASSERT(nargs >= 0);
+	DUK_ASSERT(nregs >= 0);
+	DUK_ASSERT(nregs >= nargs);
+	duk_set_top(ctx, idx_args + nargs);  /* clamp anything above nargs */
+	duk_set_top(ctx, idx_args + nregs);  /* extend with undefined */
+
+	/* FIXME: we can shrink for Ecma-to-Ecma transitions, but not beyond
+	 * entry value stack size (established by original caller).
+	 */
 
 	/*
 	 *  Shift to new valstack_bottom.
