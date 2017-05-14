@@ -1645,6 +1645,8 @@ DUK_LOCAL duk_small_uint_t duk__handle_return(duk_hthread *thr, duk_activation *
 		tv2 = thr->valstack_top - 1;
 		DUK_TVAL_SET_TVAL_UPDREF(thr, tv1, tv2);  /* side effects */
 
+		/* FIXME: construct postprocessing */
+
 		DUK_DDD(DUK_DDDPRINT("return value at idx_retval=%ld is %!T",
 		                     (long) (thr->callstack_curr->parent->idx_retval),
 		                     (duk_tval *) (thr->valstack + thr->callstack_curr->parent->idx_retval)));
@@ -4813,6 +4815,11 @@ DUK_LOCAL DUK_NOINLINE DUK_HOT void duk__js_execute_bytecode_inner(duk_hthread *
 			duk_require_stack(ctx, count);
 			tv_src = DUK_GET_TVAL_POSIDX(ctx, bc);
 			duk__push_tvals_incref_only(thr, tv_src, count);
+
+			/* FIXME: shared constructor call prep, then ecma-to-ecma
+			 * setup if possible.
+			 */
+
 			duk_new(ctx, (duk_idx_t) a);  /* [... constructor arg1 ... argN] -> [retval] */
 			duk_replace(ctx, bc);
 #endif  /* DUK_USE_EXEC_PREFER_SIZE */

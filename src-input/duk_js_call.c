@@ -1843,6 +1843,8 @@ DUK_LOCAL void duk__handle_call_inner(duk_hthread *thr,
 
 	/* [ ... retval ] */
 
+	/* FIXME: constructor call post-processing */
+
 	/* Ensure there is internal valstack spare before we exit; this may
 	 * throw an alloc error.  The same guaranteed size must be available
 	 * as before the call.  This is not optimal now: we store the valstack

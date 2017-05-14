@@ -296,6 +296,8 @@ DUK_EXTERNAL void duk_new(duk_context *ctx, duk_idx_t nargs) {
 	duk_require_callable(ctx, -1);
 	cons = duk_get_hobject(ctx, -1);
 
+	/* FIXME: move constructor call preparations into an internal helper */
+
 	/* Result is a lightfunc or a callable actual function. */
 	DUK_ASSERT(cons == NULL || DUK_HOBJECT_IS_CALLABLE(cons));
 	if (cons != NULL && !DUK_HOBJECT_HAS_CONSTRUCTABLE(cons)) {
@@ -386,6 +388,10 @@ DUK_EXTERNAL void duk_new(duk_context *ctx, duk_idx_t nargs) {
 	                            call_flags);   /* call_flags */
 
 	/* [... fallback retval] */
+
+	/* FIXME: constructor return post-processing, shared helper called
+	 * from both duk_js_call.c and duk_js_executor.c
+	 */
 
 	DUK_DDD(DUK_DDDPRINT("constructor call finished, fallback=%!iT, retval=%!iT",
 	                     (duk_tval *) duk_get_tval(ctx, -2),
